@@ -1,0 +1,32 @@
+name: Daily Meta Ads Report
+
+on:
+  schedule:
+    # Runs every day at 08:00 UTC — adjust to your timezone if needed
+    # For CET (UTC+1): 07:00 UTC | For CEST (UTC+2): 06:00 UTC
+    - cron: "0 7 * * *"
+  workflow_dispatch: # allows manual trigger from GitHub UI
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Meta report
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/meta_report.py
