@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: "0 7 * * *"   # 9:00 AM CEST — yesterday's report
     - cron: "0 10 * * *"  # 12:00 PM CEST — today so far
-    - cron: "10 15 * * *"  # 17:10 CEST (15:10 UTC) — today so far
+    - cron: "20 15 * * *"  # 17:20 CEST (15:20 UTC) — today so far
   workflow_dispatch: # allows manual trigger from GitHub UI
 
 jobs:
