@@ -9,7 +9,7 @@ META_AD_ACCOUNT_IDS = {
     "Fermato HU": os.environ["META_AD_ACCOUNT_ID_HU"],
 }
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+TELEGRAM_CHAT_IDS = [cid.strip() for cid in os.environ["TELEGRAM_CHAT_IDS"].split(",")]
 
 GRAPH_API_VERSION = "v19.0"
 
@@ -134,11 +134,11 @@ def build_account_block(account_name: str, currency: str, campaigns: list[dict])
 
 def send_telegram(message: str) -> None:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
-    response = requests.post(url, json=payload, timeout=15)
-    if not response.ok:
-        print(f"Telegram error {response.status_code}: {response.text}")
-        response.raise_for_status()
+    for chat_id in TELEGRAM_CHAT_IDS:
+        payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+        response = requests.post(url, json=payload, timeout=15)
+        if not response.ok:
+            print(f"Telegram error for {chat_id}: {response.status_code}: {response.text}")
 
 
 def main():
