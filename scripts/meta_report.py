@@ -3,15 +3,18 @@ import requests
 from datetime import date, timedelta
 
 META_ACCESS_TOKEN = os.environ["META_ACCESS_TOKEN"]
-META_AD_ACCOUNT_ID = os.environ["META_AD_ACCOUNT_ID"]
+META_AD_ACCOUNT_IDS = {
+    "Fermato CZ": os.environ["META_AD_ACCOUNT_ID_CZ"],
+    "Fermato HU": os.environ["META_AD_ACCOUNT_ID_HU"],
+}
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 GRAPH_API_VERSION = "v19.0"
 
 
-def fetch_insights(date_str: str) -> list[dict]:
-    url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/act_{META_AD_ACCOUNT_ID}/insights"
+def fetch_insights(account_id: str) -> list[dict]:
+    url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/act_{account_id}/insights"
     params = {
         "access_token": META_ACCESS_TOKEN,
         "level": "campaign",
@@ -33,7 +36,7 @@ def extract_action_value(items: list[dict], action_type: str) -> float:
     return 0.0
 
 
-def build_report(yesterday: str, campaigns: list[dict]) -> str:
+def build_report(yesterday: str, campaigns: list[dict], include_header: bool = True) -> str:
     total_spend = 0.0
     total_impressions = 0
     total_clicks = 0
@@ -99,16 +102,20 @@ def send_telegram(message: str) -> None:
 
 def main():
     yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-    print(f"Fetching Meta insights for {yesterday}...")
+    full_message = f"📊 *Meta Ads Report — {yesterday}*\n"
 
-    campaigns = fetch_insights(yesterday)
+    for account_name, account_id in META_AD_ACCOUNT_IDS.items():
+        print(f"Fetching insights for {account_name} ({account_id})...")
+        campaigns = fetch_insights(account_id)
 
-    if not campaigns:
-        message = f"📊 *Meta Ads Report — {yesterday}*\n\nNo campaign data found for this date."
-    else:
-        message = build_report(yesterday, campaigns)
+        full_message += f"\n{'─' * 28}\n🏢 *{account_name}*\n"
 
-    send_telegram(message)
+        if not campaigns:
+            full_message += "_No campaign data found._\n"
+        else:
+            full_message += build_report(yesterday, campaigns, include_header=False)
+
+    send_telegram(full_message)
     print("Report sent to Telegram.")
 
 
