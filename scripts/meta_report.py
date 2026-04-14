@@ -101,14 +101,15 @@ def build_account_block(account_name: str, currency: str, campaigns: list[dict])
     cpp_str = format_spend(cpp, currency) if cpp else "–"
     summary = f"<b>{account_name}</b>: {format_spend(total_spend, currency)} · {roas}x ROAS"
 
-    account_line = (
-        f"🏢 <b>{account_name}</b>\n"
-        f"💸 {format_spend(total_spend, currency)}  📈 {roas}x  🛒 {cpp_str}/conv\n"
-        f"👁 {int(total_reach):,} reach  🔁 {round(total_impressions/total_reach,1) if total_reach else '–'} freq  ↗ {ctr}% CTR\n"
-        f"📌 CPM {format_spend(cpm, currency)}  🖱 CPC {format_spend(cpc, currency)}"
-    )
+    freq_total = round(total_impressions / total_reach, 1) if total_reach else "–"
+    lines = [
+        f"🏢 <b>{account_name}</b>",
+        f"💸 {format_spend(total_spend, currency)} · 📈 {roas}x · 🛒 {cpp_str}/conv",
+        f"👁 {int(total_reach):,} reach · 🔁 {freq_total} freq · ↗ {ctr}% CTR",
+        f"📌 CPM {format_spend(cpm, currency)} · 🖱 CPC {format_spend(cpc, currency)}",
+        "─" * 20,
+    ]
 
-    campaign_lines = []
     for c in campaigns:
         name        = html.escape(c.get("campaign_name", "Unknown"))
         spend       = float(c.get("spend", 0))
@@ -122,13 +123,11 @@ def build_account_block(account_name: str, currency: str, campaigns: list[dict])
         roas, ctr, cpm, cpc, cpp = calc_metrics(spend, impressions, clicks, purchases, revenue, reach, freq)
         cpp_str = format_spend(cpp, currency) if cpp else "–"
 
-        campaign_lines.append(
-            f"▸ <b>{name}</b>\n"
-            f"  💸 {format_spend(spend, currency)}  📈 {roas}x  🛒 {cpp_str}\n"
-            f"  ↗ {ctr}%  🔁 {freq}  📌 {format_spend(cpm, currency)} CPM"
-        )
+        lines.append(f"▸ <b>{name}</b>")
+        lines.append(f"  💸 {format_spend(spend, currency)} · 📈 {roas}x · 🛒 {cpp_str}")
+        lines.append(f"  ↗ {ctr}% CTR · 🔁 {freq} freq · 📌 {format_spend(cpm, currency)} CPM")
 
-    block = account_line + "\n" + "\n".join(campaign_lines)
+    block = "\n".join(lines)
     return summary, block
 
 
@@ -164,9 +163,8 @@ def main():
         summaries.append(summary)
         blocks.append(block)
 
-    divider = "─" * 26
     header = f"📊 {period} · {label}\n" + "\n".join(summaries)
-    full_message = header + f"\n{divider}\n" + f"\n{divider}\n".join(blocks)
+    full_message = header + "\n" + "\n".join(blocks)
 
     send_telegram(full_message)
     print("Report sent to Telegram.")
