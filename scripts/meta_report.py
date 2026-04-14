@@ -1,4 +1,5 @@
 import os
+import html
 import requests
 from datetime import date, timedelta
 
@@ -36,25 +37,21 @@ def extract_action_value(items: list[dict], action_type: str) -> float:
     return 0.0
 
 
-def build_report(yesterday: str, campaigns: list[dict], include_header: bool = True) -> str:
+def build_account_section(campaigns: list[dict]) -> str:
     total_spend = 0.0
     total_impressions = 0
     total_clicks = 0
     total_conversions = 0.0
     total_revenue = 0.0
-
     lines = []
 
     for c in campaigns:
-        name = c.get("campaign_name", "Unknown")
+        name = html.escape(c.get("campaign_name", "Unknown"))
         spend = float(c.get("spend", 0))
         impressions = int(c.get("impressions", 0))
         clicks = int(c.get("clicks", 0))
-        actions = c.get("actions", [])
-        action_values = c.get("action_values", [])
-
-        conversions = extract_action_value(actions, "purchase")
-        revenue = extract_action_value(action_values, "purchase")
+        conversions = extract_action_value(c.get("actions", []), "purchase")
+        revenue = extract_action_value(c.get("action_values", []), "purchase")
         roas = round(revenue / spend, 2) if spend > 0 else 0.0
         ctr = round((clicks / impressions * 100), 2) if impressions > 0 else 0.0
 
@@ -65,7 +62,7 @@ def build_report(yesterday: str, campaigns: list[dict], include_header: bool = T
         total_revenue += revenue
 
         lines.append(
-            f"📁 *{name}*\n"
+            f"  📁 <b>{name}</b>\n"
             f"  Spend: €{spend:,.2f}  |  ROAS: {roas}x\n"
             f"  Impressions: {impressions:,}  |  Clicks: {clicks:,} ({ctr}%)\n"
             f"  Purchases: {int(conversions)}  |  Revenue: €{revenue:,.2f}"
@@ -74,19 +71,13 @@ def build_report(yesterday: str, campaigns: list[dict], include_header: bool = T
     total_roas = round(total_revenue / total_spend, 2) if total_spend > 0 else 0.0
     total_ctr = round((total_clicks / total_impressions * 100), 2) if total_impressions > 0 else 0.0
 
-    header = (
-        f"📊 *Meta Ads Report — {yesterday}*\n\n"
-        f"*TOTALS*\n"
-        f"💸 Spend: €{total_spend:,.2f}\n"
-        f"📈 ROAS: {total_roas}x\n"
-        f"👁 Impressions: {total_impressions:,}\n"
-        f"🖱 Clicks: {total_clicks:,} (CTR {total_ctr}%)\n"
-        f"🛒 Purchases: {int(total_conversions)}  |  Revenue: €{total_revenue:,.2f}\n"
+    totals = (
+        f"💸 Spend: €{total_spend:,.2f}  |  ROAS: {total_roas}x\n"
+        f"👁 Impressions: {total_impressions:,}  |  Clicks: {total_clicks:,} ({total_ctr}%)\n"
+        f"🛒 Purchases: {int(total_conversions)}  |  Revenue: €{total_revenue:,.2f}"
     )
 
-    campaign_section = "\n\n*BY CAMPAIGN*\n\n" + "\n\n".join(lines) if lines else ""
-
-    return header + campaign_section
+    return totals + "\n\n" + "\n\n".join(lines)
 
 
 def send_telegram(message: str) -> None:
@@ -94,28 +85,30 @@ def send_telegram(message: str) -> None:
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
-        "parse_mode": "Markdown",
+        "parse_mode": "HTML",
     }
     response = requests.post(url, json=payload, timeout=15)
-    response.raise_for_status()
+    if not response.ok:
+        print(f"Telegram error {response.status_code}: {response.text}")
+        response.raise_for_status()
 
 
 def main():
     yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-    full_message = f"📊 *Meta Ads Report — {yesterday}*\n"
+    parts = [f"📊 <b>Meta Ads Report — {yesterday}</b>"]
 
     for account_name, account_id in META_AD_ACCOUNT_IDS.items():
         print(f"Fetching insights for {account_name} ({account_id})...")
         campaigns = fetch_insights(account_id)
 
-        full_message += f"\n{'─' * 28}\n🏢 *{account_name}*\n"
+        parts.append(f"{'─' * 28}\n🏢 <b>{account_name}</b>")
 
         if not campaigns:
-            full_message += "_No campaign data found._\n"
+            parts.append("No campaign data found.")
         else:
-            full_message += build_report(yesterday, campaigns, include_header=False)
+            parts.append(build_account_section(campaigns))
 
-    send_telegram(full_message)
+    send_telegram("\n\n".join(parts))
     print("Report sent to Telegram.")
 
 
