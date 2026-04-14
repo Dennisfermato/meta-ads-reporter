@@ -2,9 +2,9 @@ name: Daily Meta Ads Report
 
 on:
   schedule:
-    # Runs every day at 08:00 UTC — adjust to your timezone if needed
-    # For CET (UTC+1): 07:00 UTC | For CEST (UTC+2): 06:00 UTC
-    - cron: "0 7 * * *"
+    # 9:30 AM CEST (UTC+2, summer) = 07:30 UTC
+    # Note: in winter (CET, UTC+1) this will fire at 08:30 AM local time
+    - cron: "30 7 * * *"
   workflow_dispatch: # allows manual trigger from GitHub UI
 
 jobs:
