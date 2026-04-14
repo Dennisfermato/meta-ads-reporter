@@ -43,7 +43,7 @@ def fetch_insights(account_id: str, active_ids: set[str], date_preset: str) -> l
     params = {
         "access_token": META_ACCESS_TOKEN,
         "level": "campaign",
-        "fields": "campaign_id,campaign_name,spend,actions,action_values",
+        "fields": "campaign_id,campaign_name,spend,impressions,clicks,reach,frequency,actions,action_values",
         "date_preset": date_preset,
         "limit": 100,
     }
@@ -70,36 +70,65 @@ def format_spend(amount: float, currency: str) -> str:
     return f"€{amount:,.2f}"
 
 
+def calc_metrics(spend: float, impressions: int, clicks: int, purchases: float, revenue: float, reach: int, frequency: float):
+    roas  = round(revenue / spend, 2)       if spend > 0        else 0.0
+    ctr   = round(clicks / impressions * 100, 1) if impressions > 0 else 0.0
+    cpm   = round(spend / impressions * 1000, 2) if impressions > 0 else 0.0
+    cpc   = round(spend / clicks, 2)        if clicks > 0       else 0.0
+    cpp   = round(spend / purchases, 2)     if purchases > 0    else None
+    return roas, ctr, cpm, cpc, cpp
+
+
 def build_account_block(account_name: str, currency: str, campaigns: list[dict]) -> tuple[str, str]:
-    """Returns (summary_line, full_block) — summary_line goes into the notification preview."""
     if not campaigns:
-        summary = f"<b>{account_name}</b>: no data"
-        block = f"🏢 <b>{account_name}</b>\nNo active campaigns with data yesterday."
-        return summary, block
+        return f"<b>{account_name}</b>: no data", f"🏢 <b>{account_name}</b>\nNo active campaigns with data."
 
-    total_spend = sum(float(c.get("spend", 0)) for c in campaigns)
-    total_revenue = sum(extract_value(c.get("action_values", []), "purchase") for c in campaigns)
-    total_roas = round(total_revenue / total_spend, 2) if total_spend > 0 else 0.0
+    total_spend = total_impressions = total_clicks = total_purchases = total_revenue = total_reach = 0.0
 
-    summary = f"<b>{account_name}</b>: {format_spend(total_spend, currency)} · ROAS {total_roas}x"
+    for c in campaigns:
+        total_spend       += float(c.get("spend", 0))
+        total_impressions += int(c.get("impressions", 0))
+        total_clicks      += int(c.get("clicks", 0))
+        total_reach       += int(c.get("reach", 0))
+        total_purchases   += extract_value(c.get("actions", []), "purchase")
+        total_revenue     += extract_value(c.get("action_values", []), "purchase")
+
+    roas, ctr, cpm, cpc, cpp = calc_metrics(
+        total_spend, int(total_impressions), int(total_clicks),
+        total_purchases, total_revenue, int(total_reach), 0
+    )
+
+    cpp_str = format_spend(cpp, currency) if cpp else "–"
+    summary = f"<b>{account_name}</b>: {format_spend(total_spend, currency)} · {roas}x ROAS"
+
+    account_line = (
+        f"🏢 <b>{account_name}</b>\n"
+        f"💸 {format_spend(total_spend, currency)}  📈 {roas}x  🛒 {cpp_str}/conv\n"
+        f"👁 {int(total_reach):,} reach  🔁 {round(total_impressions/total_reach,1) if total_reach else '–'} freq  ↗ {ctr}% CTR\n"
+        f"📌 CPM {format_spend(cpm, currency)}  🖱 CPC {format_spend(cpc, currency)}"
+    )
 
     campaign_lines = []
     for c in campaigns:
-        name = html.escape(c.get("campaign_name", "Unknown"))
-        spend = float(c.get("spend", 0))
-        revenue = extract_value(c.get("action_values", []), "purchase")
-        roas = round(revenue / spend, 2) if spend > 0 else 0.0
+        name        = html.escape(c.get("campaign_name", "Unknown"))
+        spend       = float(c.get("spend", 0))
+        impressions = int(c.get("impressions", 0))
+        clicks      = int(c.get("clicks", 0))
+        reach       = int(c.get("reach", 0))
+        purchases   = extract_value(c.get("actions", []), "purchase")
+        revenue     = extract_value(c.get("action_values", []), "purchase")
+        freq        = round(impressions / reach, 1) if reach > 0 else 0.0
+
+        roas, ctr, cpm, cpc, cpp = calc_metrics(spend, impressions, clicks, purchases, revenue, reach, freq)
+        cpp_str = format_spend(cpp, currency) if cpp else "–"
+
         campaign_lines.append(
-            f"  • <b>{name}</b>\n"
-            f"    {format_spend(spend, currency)}  |  ROAS {roas}x"
+            f"▸ <b>{name}</b>\n"
+            f"  💸 {format_spend(spend, currency)}  📈 {roas}x  🛒 {cpp_str}\n"
+            f"  ↗ {ctr}%  🔁 {freq}  📌 {format_spend(cpm, currency)} CPM"
         )
 
-    block = (
-        f"🏢 <b>{account_name}</b>\n"
-        f"💸 {format_spend(total_spend, currency)}  |  📈 ROAS {total_roas}x\n\n"
-        f"<b>Active campaigns:</b>\n\n" + "\n\n".join(campaign_lines)
-    )
-
+    block = account_line + "\n\n" + "\n\n".join(campaign_lines)
     return summary, block
 
 
@@ -128,15 +157,15 @@ def main():
 
     for account_name, account_id in META_AD_ACCOUNT_IDS.items():
         print(f"Fetching {account_name}...")
-        currency = fetch_account_currency(account_id)
+        currency   = fetch_account_currency(account_id)
         active_ids = fetch_active_campaign_ids(account_id)
-        campaigns = fetch_insights(account_id, active_ids, date_preset)
+        campaigns  = fetch_insights(account_id, active_ids, date_preset)
         summary, block = build_account_block(account_name, currency, campaigns)
         summaries.append(summary)
         blocks.append(block)
 
+    divider = "─" * 26
     header = f"📊 {period} · {label}\n" + "\n".join(summaries)
-    divider = "─" * 28
     full_message = header + f"\n\n{divider}\n\n" + f"\n\n{divider}\n\n".join(blocks)
 
     send_telegram(full_message)
