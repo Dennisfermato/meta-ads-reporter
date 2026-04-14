@@ -23,21 +23,36 @@ def fetch_account_currency(account_id: str) -> str:
     return "EUR"
 
 
-def fetch_insights(account_id: str) -> list[dict]:
+def fetch_active_campaign_ids(account_id: str) -> set[str]:
+    url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/act_{account_id}/campaigns"
+    params = {
+        "access_token": META_ACCESS_TOKEN,
+        "effective_status": '["ACTIVE"]',
+        "fields": "id",
+        "limit": 200,
+    }
+    response = requests.get(url, params=params, timeout=30)
+    if not response.ok:
+        print(f"Meta API error fetching campaigns: {response.text}")
+        return set()
+    return {c["id"] for c in response.json().get("data", [])}
+
+
+def fetch_insights(account_id: str, active_ids: set[str]) -> list[dict]:
     url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/act_{account_id}/insights"
     params = {
         "access_token": META_ACCESS_TOKEN,
         "level": "campaign",
-        "fields": "campaign_name,spend,impressions,clicks,actions,action_values",
+        "fields": "campaign_id,campaign_name,spend,actions,action_values",
         "date_preset": "yesterday",
-        "filtering": '[{"field":"effective_status","operator":"IN","value":["ACTIVE"]}]',
         "limit": 100,
     }
     response = requests.get(url, params=params, timeout=30)
     if not response.ok:
         print(f"Meta API error {response.status_code}: {response.text}")
         response.raise_for_status()
-    return response.json().get("data", [])
+    data = response.json().get("data", [])
+    return [c for c in data if c.get("campaign_id") in active_ids]
 
 
 def extract_value(items: list[dict], action_type: str) -> float:
@@ -106,7 +121,8 @@ def main():
     for account_name, account_id in META_AD_ACCOUNT_IDS.items():
         print(f"Fetching {account_name}...")
         currency = fetch_account_currency(account_id)
-        campaigns = fetch_insights(account_id)
+        active_ids = fetch_active_campaign_ids(account_id)
+        campaigns = fetch_insights(account_id, active_ids)
         summary, block = build_account_block(account_name, currency, campaigns)
         summaries.append(summary)
         blocks.append(block)
