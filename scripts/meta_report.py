@@ -1,7 +1,7 @@
 import os
 import html
 import requests
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 
 META_ACCESS_TOKEN = os.environ["META_ACCESS_TOKEN"]
 META_AD_ACCOUNT_IDS = {
@@ -38,13 +38,13 @@ def fetch_active_campaign_ids(account_id: str) -> set[str]:
     return {c["id"] for c in response.json().get("data", [])}
 
 
-def fetch_insights(account_id: str, active_ids: set[str]) -> list[dict]:
+def fetch_insights(account_id: str, active_ids: set[str], date_preset: str) -> list[dict]:
     url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/act_{account_id}/insights"
     params = {
         "access_token": META_ACCESS_TOKEN,
         "level": "campaign",
         "fields": "campaign_id,campaign_name,spend,actions,action_values",
-        "date_preset": "yesterday",
+        "date_preset": date_preset,
         "limit": 100,
     }
     response = requests.get(url, params=params, timeout=30)
@@ -113,7 +113,15 @@ def send_telegram(message: str) -> None:
 
 
 def main():
-    yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    utc_hour = datetime.now(timezone.utc).hour
+    if utc_hour < 9:
+        date_preset = "yesterday"
+        label = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        period = "Yesterday"
+    else:
+        date_preset = "today"
+        label = date.today().strftime("%Y-%m-%d")
+        period = "Today so far"
 
     summaries = []
     blocks = []
@@ -122,13 +130,12 @@ def main():
         print(f"Fetching {account_name}...")
         currency = fetch_account_currency(account_id)
         active_ids = fetch_active_campaign_ids(account_id)
-        campaigns = fetch_insights(account_id, active_ids)
+        campaigns = fetch_insights(account_id, active_ids, date_preset)
         summary, block = build_account_block(account_name, currency, campaigns)
         summaries.append(summary)
         blocks.append(block)
 
-    # Notification preview: date + both account totals on the first lines
-    header = f"📊 {yesterday}\n" + "\n".join(summaries)
+    header = f"📊 {period} · {label}\n" + "\n".join(summaries)
     divider = "─" * 28
     full_message = header + f"\n\n{divider}\n\n" + f"\n\n{divider}\n\n".join(blocks)
 
