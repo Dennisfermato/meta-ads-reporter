@@ -14,6 +14,15 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 GRAPH_API_VERSION = "v19.0"
 
 
+def fetch_account_currency(account_id: str) -> str:
+    url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/act_{account_id}"
+    params = {"access_token": META_ACCESS_TOKEN, "fields": "currency"}
+    response = requests.get(url, params=params, timeout=15)
+    if response.ok:
+        return response.json().get("currency", "EUR")
+    return "EUR"
+
+
 def fetch_insights(account_id: str) -> list[dict]:
     url = f"https://graph.facebook.com/{GRAPH_API_VERSION}/act_{account_id}/insights"
     params = {
@@ -38,44 +47,50 @@ def extract_value(items: list[dict], action_type: str) -> float:
     return 0.0
 
 
-def build_account_section(campaigns: list[dict]) -> str:
-    total_spend = 0.0
-    total_revenue = 0.0
-    campaign_lines = []
+def format_spend(amount: float, currency: str) -> str:
+    if currency == "CZK":
+        return f"Kč{amount:,.0f}"
+    if currency == "HUF":
+        return f"Ft{amount:,.0f}"
+    return f"€{amount:,.2f}"
 
+
+def build_account_block(account_name: str, currency: str, campaigns: list[dict]) -> tuple[str, str]:
+    """Returns (summary_line, full_block) — summary_line goes into the notification preview."""
+    if not campaigns:
+        summary = f"<b>{account_name}</b>: no data"
+        block = f"🏢 <b>{account_name}</b>\nNo active campaigns with data yesterday."
+        return summary, block
+
+    total_spend = sum(float(c.get("spend", 0)) for c in campaigns)
+    total_revenue = sum(extract_value(c.get("action_values", []), "purchase") for c in campaigns)
+    total_roas = round(total_revenue / total_spend, 2) if total_spend > 0 else 0.0
+
+    summary = f"<b>{account_name}</b>: {format_spend(total_spend, currency)} · ROAS {total_roas}x"
+
+    campaign_lines = []
     for c in campaigns:
         name = html.escape(c.get("campaign_name", "Unknown"))
         spend = float(c.get("spend", 0))
         revenue = extract_value(c.get("action_values", []), "purchase")
         roas = round(revenue / spend, 2) if spend > 0 else 0.0
-
-        total_spend += spend
-        total_revenue += revenue
-
         campaign_lines.append(
             f"  • <b>{name}</b>\n"
-            f"    Spend: €{spend:,.2f}  |  ROAS: {roas}x"
+            f"    {format_spend(spend, currency)}  |  ROAS {roas}x"
         )
 
-    total_roas = round(total_revenue / total_spend, 2) if total_spend > 0 else 0.0
-
-    account_summary = (
-        f"💸 Spend: €{total_spend:,.2f}\n"
-        f"📈 ROAS: {total_roas}x"
+    block = (
+        f"🏢 <b>{account_name}</b>\n"
+        f"💸 {format_spend(total_spend, currency)}  |  📈 ROAS {total_roas}x\n\n"
+        f"<b>Active campaigns:</b>\n\n" + "\n\n".join(campaign_lines)
     )
 
-    campaigns_block = "\n\n".join(campaign_lines)
-
-    return account_summary, campaigns_block
+    return summary, block
 
 
 def send_telegram(message: str) -> None:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML",
-    }
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
     response = requests.post(url, json=payload, timeout=15)
     if not response.ok:
         print(f"Telegram error {response.status_code}: {response.text}")
@@ -84,23 +99,24 @@ def send_telegram(message: str) -> None:
 
 def main():
     yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-    parts = [f"📊 <b>Meta Ads — {yesterday}</b>"]
+
+    summaries = []
+    blocks = []
 
     for account_name, account_id in META_AD_ACCOUNT_IDS.items():
-        print(f"Fetching insights for {account_name} ({account_id})...")
+        print(f"Fetching {account_name}...")
+        currency = fetch_account_currency(account_id)
         campaigns = fetch_insights(account_id)
+        summary, block = build_account_block(account_name, currency, campaigns)
+        summaries.append(summary)
+        blocks.append(block)
 
-        parts.append(f"{'─' * 28}\n🏢 <b>{account_name}</b>")
+    # Notification preview: date + both account totals on the first lines
+    header = f"📊 {yesterday}\n" + "\n".join(summaries)
+    divider = "─" * 28
+    full_message = header + f"\n\n{divider}\n\n" + f"\n\n{divider}\n\n".join(blocks)
 
-        if not campaigns:
-            parts.append("No active campaigns with data yesterday.")
-            continue
-
-        account_summary, campaigns_block = build_account_section(campaigns)
-        parts.append(account_summary)
-        parts.append(f"<b>Active campaigns:</b>\n\n{campaigns_block}")
-
-    send_telegram("\n\n".join(parts))
+    send_telegram(full_message)
     print("Report sent to Telegram.")
 
 
