@@ -16,11 +16,13 @@ def fetch_insights(date_str: str) -> list[dict]:
         "access_token": META_ACCESS_TOKEN,
         "level": "campaign",
         "fields": "campaign_name,spend,impressions,clicks,actions,action_values",
-        "time_range": f'{{"since":"{date_str}","until":"{date_str}"}}',
+        "date_preset": "yesterday",
         "limit": 100,
     }
     response = requests.get(url, params=params, timeout=30)
-    response.raise_for_status()
+    if not response.ok:
+        print(f"Meta API error {response.status_code}: {response.text}")
+        response.raise_for_status()
     return response.json().get("data", [])
 
 
