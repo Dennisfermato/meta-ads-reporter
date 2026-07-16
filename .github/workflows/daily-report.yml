@@ -6,6 +6,15 @@ on:
     - cron: "0 10 * * *"  # 12:00 PM CEST — today so far
     - cron: "20 15 * * *"  # 17:20 CEST (15:20 UTC) — today so far
   workflow_dispatch: # allows manual trigger from GitHub UI
+    inputs:
+      accounts:
+        description: "Which accounts to report (all, cz, hu)"
+        required: false
+        default: "all"
+      date_preset:
+        description: "Force date range (auto, yesterday, today)"
+        required: false
+        default: "auto"
 
 jobs:
   send-report:
@@ -30,4 +39,6 @@ jobs:
           META_AD_ACCOUNT_ID_HU: ${{ secrets.META_AD_ACCOUNT_ID_HU }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
+          REPORT_ACCOUNTS: ${{ github.event.inputs.accounts || 'all' }}
+          FORCE_DATE_PRESET: ${{ github.event.inputs.date_preset || 'auto' }}
         run: python scripts/meta_report.py

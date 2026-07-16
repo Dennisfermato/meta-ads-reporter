@@ -140,21 +140,31 @@ def send_telegram(message: str) -> None:
             print(f"Telegram error for {chat_id}: {response.status_code}: {response.text}")
 
 
+def resolve_date_preset() -> tuple[str, str, str]:
+    forced = os.environ.get("FORCE_DATE_PRESET", "").strip().lower()
+    if forced not in ("yesterday", "today"):
+        forced = "yesterday" if datetime.now(timezone.utc).hour < 9 else "today"
+
+    if forced == "yesterday":
+        return "yesterday", (date.today() - timedelta(days=1)).strftime("%Y-%m-%d"), "Yesterday"
+    return "today", date.today().strftime("%Y-%m-%d"), "Today so far"
+
+
+def accounts_to_report() -> dict[str, str]:
+    raw = os.environ.get("REPORT_ACCOUNTS", "all").strip().lower()
+    if raw in ("", "all"):
+        return META_AD_ACCOUNT_IDS
+    wanted = {p.strip() for p in raw.split(",")}
+    return {name: aid for name, aid in META_AD_ACCOUNT_IDS.items() if name.split()[-1].lower() in wanted}
+
+
 def main():
-    utc_hour = datetime.now(timezone.utc).hour
-    if utc_hour < 9:
-        date_preset = "yesterday"
-        label = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-        period = "Yesterday"
-    else:
-        date_preset = "today"
-        label = date.today().strftime("%Y-%m-%d")
-        period = "Today so far"
+    date_preset, label, period = resolve_date_preset()
 
     summaries = []
     blocks = []
 
-    for account_name, account_id in META_AD_ACCOUNT_IDS.items():
+    for account_name, account_id in accounts_to_report().items():
         print(f"Fetching {account_name}...")
         currency   = fetch_account_currency(account_id)
         active_ids = fetch_active_campaign_ids(account_id)
@@ -166,6 +176,7 @@ def main():
     header = f"📊 {period} · {label}\n" + "\n".join(summaries)
     full_message = header + "\n" + "\n".join(blocks)
 
+    print(full_message)
     send_telegram(full_message)
     print("Report sent to Telegram.")
 
