@@ -142,17 +142,66 @@ def main():
             "cost_per_thruplay": round(spend / thruplay, 3) if thruplay else None,
         })
 
-    print(f"Found {len(video_ads)} real (non-banner, non-SK, non-sales) video ads over {DATE_PRESET} for account {TARGET_ACCOUNT}")
+    print(f"Found {len(video_ads)} real (non-banner, non-SK, non-sales) video ad rows over {DATE_PRESET} for account {TARGET_ACCOUNT}")
     print(json.dumps(video_ads, indent=2, ensure_ascii=False))
 
     if not video_ads:
         return
 
+    # Same ad_name = same creative running in multiple adsets. Combine raw
+    # counts before recomputing rates, rather than averaging pre-computed
+    # per-adset rates.
+    creatives = {}
+    for a in video_ads:
+        c = creatives.setdefault(a["ad_name"], {
+            "ad_name": a["ad_name"],
+            "campaigns": set(),
+            "adsets": set(),
+            "impressions": 0,
+            "spend": 0.0,
+            "video_views": 0.0,
+            "p100_completions": 0.0,
+            "thruplays": 0.0,
+            "engagement": 0.0,
+        })
+        c["campaigns"].add(a["campaign_name"])
+        c["adsets"].add(a["adset_name"])
+        c["impressions"] += a["impressions"]
+        c["spend"] += a["spend"]
+        c["video_views"] += a["video_views"]
+        c["p100_completions"] += a["p100_completions"]
+        c["thruplays"] += a["thruplays"]
+        c["engagement"] += a["engagement"]
+
+    combined = []
+    for c in creatives.values():
+        impressions = c["impressions"]
+        spend = c["spend"]
+        view_through = c["thruplays"] or c["p100_completions"]
+        combined.append({
+            "ad_name": c["ad_name"],
+            "campaigns": ", ".join(sorted(c["campaigns"])),
+            "adset_count": len(c["adsets"]),
+            "impressions": impressions,
+            "spend": round(spend, 2),
+            "cpm": round(spend / impressions * 1000, 2),
+            "video_views": c["video_views"],
+            "p100_completions": c["p100_completions"],
+            "thruplays": c["thruplays"],
+            "view_through_rate_pct": round(view_through / impressions * 100, 2) if view_through else 0.0,
+            "engagement": c["engagement"],
+            "engagement_rate_pct": round(c["engagement"] / impressions * 100, 3) if c["engagement"] else 0.0,
+            "cost_per_thruplay": round(spend / c["thruplays"], 3) if c["thruplays"] else None,
+        })
+
+    print(f"\nCombined into {len(combined)} distinct creatives")
+    print(json.dumps(combined, indent=2, ensure_ascii=False))
+
     # Composite score: average rank across CPM (lower better), view-through
     # rate, impressions, and engagement rate (all higher better). Lower score
     # wins.
     def ranks(key, reverse):
-        ordered = sorted(video_ads, key=lambda a: a[key], reverse=reverse)
+        ordered = sorted(combined, key=lambda a: a[key], reverse=reverse)
         return {id(a): i for i, a in enumerate(ordered)}
 
     cpm_ranks = ranks("cpm", reverse=False)
@@ -160,17 +209,17 @@ def main():
     impr_ranks = ranks("impressions", reverse=True)
     eng_ranks = ranks("engagement_rate_pct", reverse=True)
 
-    for a in video_ads:
+    for a in combined:
         a["composite_rank_score"] = (
             cpm_ranks[id(a)] + vtr_ranks[id(a)] + impr_ranks[id(a)] + eng_ranks[id(a)]
         ) / 4
 
-    top10 = sorted(video_ads, key=lambda a: a["composite_rank_score"])[:10]
+    top10 = sorted(combined, key=lambda a: a["composite_rank_score"])[:10]
 
-    print("\n--- TOP 10 NON-SALES VIDEO ADS (composite of CPM, view-through rate, impressions, engagement rate) ---")
+    print("\n--- TOP 10 NON-SALES VIDEO CREATIVES, COMBINED ACROSS ADSETS (composite of CPM, view-through rate, impressions, engagement rate) ---")
     for i, a in enumerate(top10, 1):
         print(
-            f"{i}. {a['ad_name']} | {a['campaign_name']} / {a['adset_name']} | "
+            f"{i}. {a['ad_name']} | {a['campaigns']} ({a['adset_count']} adsets) | "
             f"CPM {a['cpm']} | VTR {a['view_through_rate_pct']}% | "
             f"impressions {a['impressions']} | eng rate {a['engagement_rate_pct']}% | "
             f"spend {a['spend']} | cost/thruplay {a['cost_per_thruplay']}"
