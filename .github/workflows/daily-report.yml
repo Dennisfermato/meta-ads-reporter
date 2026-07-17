@@ -15,6 +15,14 @@ on:
         description: "Force date range (auto, yesterday, today)"
         required: false
         default: "auto"
+      mode:
+        description: "Script to run (report, video_analysis)"
+        required: false
+        default: "report"
+      video_days_back:
+        description: "Lookback window for video analysis (30 or 90)"
+        required: false
+        default: "90"
 
 jobs:
   send-report:
@@ -32,7 +40,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run Meta report
+      - name: Run Meta script
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           META_AD_ACCOUNT_ID_CZ: ${{ secrets.META_AD_ACCOUNT_ID_CZ }}
@@ -41,4 +49,11 @@ jobs:
           TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
           REPORT_ACCOUNTS: ${{ github.event.inputs.accounts || 'all' }}
           FORCE_DATE_PRESET: ${{ github.event.inputs.date_preset || 'auto' }}
-        run: python scripts/meta_report.py
+          VIDEO_REPORT_ACCOUNT: ${{ github.event.inputs.accounts || 'cz' }}
+          VIDEO_REPORT_DATE_PRESET: ${{ github.event.inputs.video_days_back == '30' && 'last_30d' || 'last_90d' }}
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "video_analysis" ]; then
+            python scripts/video_ad_report.py
+          else
+            python scripts/meta_report.py
+          fi
