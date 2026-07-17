@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import requests
 
@@ -13,6 +14,12 @@ DATE_PRESET = os.environ.get("VIDEO_REPORT_DATE_PRESET", "last_90d")
 # Ads belonging to a sales-objective campaign are excluded; everything else
 # (awareness, traffic, engagement, video views, leads) counts as "non sales".
 EXCLUDED_OBJECTIVES = {"OUTCOME_SALES"}
+
+# Below this video-view/impression ratio, treat the row as a banner/static
+# asset (video fields present but effectively unwatched), not a real video ad.
+MIN_VIDEO_VIEW_RATIO = 0.05
+
+EXCLUDE_NAME_PATTERN = re.compile(r"\bSK\b")
 
 
 def fetch_campaigns(account_id: str) -> dict:
@@ -93,6 +100,12 @@ def main():
         if impressions == 0:
             continue
 
+        ad_name = r.get("ad_name") or ""
+        adset_name = r.get("adset_name") or ""
+        campaign_name = r.get("campaign_name") or ""
+        if any(EXCLUDE_NAME_PATTERN.search(n) for n in (ad_name, adset_name, campaign_name)):
+            continue
+
         spend = float(r.get("spend", 0))
         actions = r.get("actions", [])
         video_views = extract_value(actions, "video_view")
@@ -101,6 +114,8 @@ def main():
 
         if video_views == 0 and p100 == 0 and thruplay == 0:
             continue  # not a video ad
+        if video_views / impressions < MIN_VIDEO_VIEW_RATIO:
+            continue  # video field present but effectively unwatched -> banner/static asset
 
         post_engagement = extract_value(actions, "post_engagement")
         engagement = post_engagement or (
@@ -127,31 +142,39 @@ def main():
             "cost_per_thruplay": round(spend / thruplay, 3) if thruplay else None,
         })
 
-    print(f"Found {len(video_ads)} non-sales video ads over {DATE_PRESET} for account {TARGET_ACCOUNT}")
+    print(f"Found {len(video_ads)} real (non-banner, non-SK, non-sales) video ads over {DATE_PRESET} for account {TARGET_ACCOUNT}")
     print(json.dumps(video_ads, indent=2, ensure_ascii=False))
 
     if not video_ads:
         return
 
-    def top(key, reverse=True, filter_none=True):
-        pool = [a for a in video_ads if a[key] is not None] if filter_none else video_ads
-        return sorted(pool, key=lambda a: a[key], reverse=reverse)[:5]
+    # Composite score: average rank across CPM (lower better), view-through
+    # rate, impressions, and engagement rate (all higher better). Lower score
+    # wins.
+    def ranks(key, reverse):
+        ordered = sorted(video_ads, key=lambda a: a[key], reverse=reverse)
+        return {id(a): i for i, a in enumerate(ordered)}
 
-    print("\n--- TOP 5 BY LOWEST CPM ---")
-    for a in top("cpm", reverse=False):
-        print(f"{a['ad_name']} | {a['campaign_name']} | CPM {a['cpm']} | impressions {a['impressions']}")
+    cpm_ranks = ranks("cpm", reverse=False)
+    vtr_ranks = ranks("view_through_rate_pct", reverse=True)
+    impr_ranks = ranks("impressions", reverse=True)
+    eng_ranks = ranks("engagement_rate_pct", reverse=True)
 
-    print("\n--- TOP 5 BY VIEW-THROUGH RATE ---")
-    for a in top("view_through_rate_pct"):
-        print(f"{a['ad_name']} | {a['campaign_name']} | VTR {a['view_through_rate_pct']}% | thruplays {a['thruplays']} | p100 {a['p100_completions']}")
+    for a in video_ads:
+        a["composite_rank_score"] = (
+            cpm_ranks[id(a)] + vtr_ranks[id(a)] + impr_ranks[id(a)] + eng_ranks[id(a)]
+        ) / 4
 
-    print("\n--- TOP 5 BY IMPRESSIONS ---")
-    for a in top("impressions"):
-        print(f"{a['ad_name']} | {a['campaign_name']} | impressions {a['impressions']} | spend {a['spend']}")
+    top10 = sorted(video_ads, key=lambda a: a["composite_rank_score"])[:10]
 
-    print("\n--- TOP 5 BY ENGAGEMENT RATE ---")
-    for a in top("engagement_rate_pct"):
-        print(f"{a['ad_name']} | {a['campaign_name']} | eng rate {a['engagement_rate_pct']}% | engagement {a['engagement']}")
+    print("\n--- TOP 10 NON-SALES VIDEO ADS (composite of CPM, view-through rate, impressions, engagement rate) ---")
+    for i, a in enumerate(top10, 1):
+        print(
+            f"{i}. {a['ad_name']} | {a['campaign_name']} / {a['adset_name']} | "
+            f"CPM {a['cpm']} | VTR {a['view_through_rate_pct']}% | "
+            f"impressions {a['impressions']} | eng rate {a['engagement_rate_pct']}% | "
+            f"spend {a['spend']} | cost/thruplay {a['cost_per_thruplay']}"
+        )
 
 
 if __name__ == "__main__":
