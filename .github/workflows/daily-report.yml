@@ -23,6 +23,10 @@ on:
         description: "Lookback window for video analysis (30 or 90)"
         required: false
         default: "90"
+      include_paused:
+        description: "Report mode: include campaigns that are now paused but had spend in the date window (true/false)"
+        required: false
+        default: "false"
 
 jobs:
   send-report:
@@ -51,6 +55,7 @@ jobs:
           FORCE_DATE_PRESET: ${{ github.event.inputs.date_preset || 'auto' }}
           VIDEO_REPORT_ACCOUNT: ${{ github.event.inputs.accounts || 'cz' }}
           VIDEO_REPORT_DATE_PRESET: ${{ github.event.inputs.video_days_back == '30' && 'last_30d' || 'last_90d' }}
+          INCLUDE_PAUSED: ${{ github.event.inputs.include_paused || 'false' }}
         run: |
           if [ "${{ github.event.inputs.mode }}" = "video_analysis" ]; then
             python scripts/video_ad_report.py
