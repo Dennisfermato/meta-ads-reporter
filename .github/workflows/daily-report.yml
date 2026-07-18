@@ -16,7 +16,7 @@ on:
         required: false
         default: "auto"
       mode:
-        description: "Script to run (report, video_analysis)"
+        description: "Script to run (report, video_analysis, campaign_status)"
         required: false
         default: "report"
       video_days_back:
@@ -54,6 +54,8 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.mode }}" = "video_analysis" ]; then
             python scripts/video_ad_report.py
+          elif [ "${{ github.event.inputs.mode }}" = "campaign_status" ]; then
+            python scripts/campaign_status.py
           else
             python scripts/meta_report.py
           fi
